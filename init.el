@@ -1,11 +1,47 @@
 ;;; init.el --- minimal, tidy Emacs config for C/C++ & Rust + LSP
+(setq lsp-clients-clangd-executable "clangd")
 
-;; ---------------- Screen adjustment ----------------
 ;; Start Emacs Maximized
 (add-to-list 'default-frame-alist '(fullscreen . maximized))
 
-;; Set default font size to 14pt (140)
-(set-face-attribute 'default nil :height 140)
+;; Set default font size to 11pt (110)
+(set-face-attribute 'default nil :height 110)
+
+;; ---------------- Scroll mod ----------------
+(setq scroll-margin 10)
+(setq scroll-preserve-screen-position t)
+
+;; ---------------- All-caps mod ----------------
+(defun my/backward-word-and-upcase ()
+  "Move cursor backward by one word and then change the case of the word under point."
+  (interactive)
+  (let ((orig-pos (point)))    ;; Save original position of point
+    (backward-word)            ;; Move cursor backward by one word
+    (upcase-word 1)            ;; Change the case of the word under the cursor
+    (goto-char orig-pos)))     ;; Return cursor to the original position
+
+(global-set-key (kbd "M-u") 'my/backward-word-and-upcase)
+
+;; ---------------- Syntax highlighting off ----------------
+;;(add-hook 'prog-mode-hook #'font-lock-mode-off)
+;; Disable syntax highlighting everywhere by default
+(global-font-lock-mode -1)
+
+;; Explicitly enable it for vterm
+(add-hook 'vterm-mode-hook #'font-lock-mode)
+
+;; Explicitly enable it for eshell
+(add-hook 'eshell-mode-hook #'font-lock-mode)
+
+;; Explicitly enable it for dire
+(add-hook 'dired-mode-hook #'font-lock-mode)
+
+;; required in Ubuntu but desktop but not on laptop WSL
+(use-package exec-path-from-shell
+  :ensure t
+  :config
+  (exec-path-from-shell-initialize)
+  (exec-path-from-shell-copy-env "GEMINI_API_KEY"))
 
 ;; ---------------- gptel setup, API key definition----------------
 (use-package gptel
@@ -69,20 +105,31 @@
 (ido-mode 1)
 
 ;; ---------------- Keybindings ----------------
-(global-set-key (kbd "C-;") (kbd "<RET>"))                  ; C-; => RET
-(global-set-key (kbd "C-:") #'delete-backward-char)         ; C-: => backspace
-(global-set-key (kbd "M-:") #'backward-kill-word)           ; M-: => delete word
-(global-set-key (kbd "M-]") #'eval-expression)              ; M-: => delete word
 (global-set-key (kbd "C-.") #'ido-switch-buffer)            ; switch buffer
 (global-set-key (kbd "C-,") #'other-window)                 ; switch window
 (global-set-key (kbd "C-c c") #'recompile)                  ; quick rebuild
 
+(define-key key-translation-map (kbd "C-h") (kbd "<DEL>"))
+(define-key key-translation-map (kbd "DEL") (kbd "C-h"))
+(global-set-key (kbd "C-M-h") #'backward-kill-word)
+
 ;; ---------------- Forward to word ----------------
 (require 'misc)
-(global-set-key (kbd "M-f") #'forward-to-word)
+(global-set-key (kbd "C-;") #'forward-to-word)
 
+;; ---------------- backward uppercase word ----------------
+(defun backward-upcase-word ()
+  "Move back one word and uppercase it."
+  (interactive)
+  (backward-word)
+  (upcase-word 1))
 
-;; ---------------- copy-sexp-at-point ----------------
+(global-set-key (kbd "C-8") #'backward-upcase-word)
+
+(global-set-key (kbd "C-9") #'dabbrev-expand)        ; C-9 simple completion
+
+;; ---------------- copy sexp at point ----------------
+
 (defun copy-sexp-at-point ()
   "Copy the s-expression at point to the kill ring without moving the cursor."
   (interactive)
@@ -92,17 +139,38 @@
       (copy-region-as-kill start (point))
       (message "S-exp copied to kill ring"))))
 
-(global-set-key (kbd "C-0") #'copy-sexp-at-point)
-(global-set-key (kbd "C-9") #'dabbrev-expand)        ; C-9 simple completion
+(global-set-key (kbd "C-:") #'copy-sexp-at-point)
 
 ;; ---------------- Indentation / tabs ----------------
-(setq-default tab-width 2
+(setq-default tab-width 4
               indent-tabs-mode nil) ; use spaces, not hard tabs
-(setq tab-stop-list (number-sequence 2 200 2))
+(setq tab-stop-list (number-sequence 4 200 4))
 (setq indent-line-function 'insert-tab)
 (setq c-default-style "linux"
-      c-basic-offset 2)
+      c-basic-offset 4)
 (setq lsp-enable-on-type-formatting nil)
+
+;; ---------------- vterm terminal ----------------
+(use-package vterm
+  :ensure t
+  :commands vterm
+  :config
+  (setq vterm-max-scrollback 10000))
+
+(with-eval-after-load 'vterm
+  ;; --- Terminal-editing keys (send terminal keys, not Emacs edits) ---
+  ;; keep these in exceptions so our lambdas run instead of raw pass-through
+  (dolist (k '("C-;" "M-:"))
+    (add-to-list 'vterm-keymap-exceptions k))
+
+  ;; C-; => backspace in the terminal
+  (define-key vterm-mode-map (kbd "C-;")
+    (lambda () (interactive) (vterm-send-key "<backspace>")))
+
+  ;; M-: => backward-kill-word (Meta-Backspace) in the terminal
+  ;; (works with bash/readline, zsh, fish in emacs-mode)
+  (define-key vterm-mode-map (kbd "M-:")
+    (lambda () (interactive) (vterm-send-key "<backspace>" nil t))))
 
 ;; ---------------- Packages / use-package -------------
 (require 'package)
@@ -173,15 +241,32 @@
   ;;  "--compile-commands-dir=build"))
   )
 
-(with-eval-after-load 'lsp-clangd
-  (setq lsp-clients-clangd-executable "clangd")
-  (setq lsp-clients-clangd-args
-        '("--background-index"
-          "--clang-tidy"
-          "--completion-style=detailed"
-          "--header-insertion=never"
-          "--compile-commands-dir=build"
-          "--query-driver=/usr/bin/g++,/usr/bin/c++")))
+;; recent comment
+;; (with-eval-after-load 'lsp-clangd
+;;   (setq lsp-clients-clangd-executable "clangd")
+;;   (setq lsp-clients-clangd-args
+;;         '("--background-index"
+;;           "--clang-tidy"
+;;           "--completion-style=detailed"
+;;           "--header-insertion=never"
+;;           "--compile-commands-dir=build"
+;;           "--query-driver=/usr/bin/g++,/usr/bin/c++")))
+
+(defun my/lsp-clangd-setup-for-tramp ()
+  "Configure clangd for TRAMP buffers."
+  (when (file-remote-p default-directory)
+    ;; Use clangd from the container
+    (setq-local lsp-clients-clangd-executable
+                (or (executable-find "clangd") "/usr/bin/clangd"))
+    ;; Optional: adjust args for remote
+    (setq-local lsp-clients-clangd-args
+                '("--background-index"
+                  "--clang-tidy"
+                  "--completion-style=detailed"
+                  "--header-insertion=never"
+                  "--compile-commands-dir=/ros/catkin_ws/build"
+                  "--query-driver=/usr/bin/g++,/usr/bin/c++"))))
+(add-hook 'lsp-mode-hook #'my/lsp-clangd-setup-for-tramp)
 
 ;; bulletproff wrapper
 (require 'lsp-clangd)
@@ -233,14 +318,14 @@
   (setq lsp-disabled-clients '(pyls))   ;; disable the old 'pyls'
   (add-to-list 'lsp-enabled-clients 'pylsp))
 
-;; Debugger (DAP) + Python adapter; requires pip install debugpy in venv
+;; Debugger (DAP) + Python adapter; requires pip install debugpy in your venv
 (use-package dap-mode
   :after lsp-mode
   :config
   (dap-auto-configure-mode)
   (with-eval-after-load 'dap-mode
     (require 'dap-python))        ;; only after dap-mode is loaded
-  ;; If system python is named python3, uncomment:
+  ;; If your system python is named python3, uncomment:
   ;; (setq dap-python-executable "python3")
   (setq dap-python-debugger 'debugpy))
 
@@ -264,3 +349,16 @@
 
 (provide 'init)
 ;;; init.el ends here
+(custom-set-variables
+ ;; custom-set-variables was added by Custom.
+ ;; If you edit it by hand, you could mess it up, so be careful.
+ ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
+ '(package-selected-packages
+   '(exec-path-from-shell gptel vterm yasnippet rustic pyvenv magit lsp-ui flycheck dap-mode company)))
+(custom-set-faces
+ ;; custom-set-faces was added by Custom.
+ ;; If you edit it by hand, you could mess it up, so be careful.
+ ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
+ )
